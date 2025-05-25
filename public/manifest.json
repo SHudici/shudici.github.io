@@ -1,6 +1,7 @@
 {
   "short_name": "Tree of Life",
-  "name": "Tree of Life - RPG Skill Tree",
+  "name": "Tree of Life - Interactive Skill Development System",
+  "description": "An interactive RPG-style skill tree for personal development. Track your growth across physical, mental, social, creative, and spiritual domains with intuitive zoom and pan controls.",
   "icons": [
     {
       "src": "favicon.ico",
@@ -10,16 +11,27 @@
     {
       "src": "logo192.png",
       "type": "image/png",
-      "sizes": "192x192"
+      "sizes": "192x192",
+      "purpose": "any maskable"
     },
     {
       "src": "logo512.png",
       "type": "image/png",
-      "sizes": "512x512"
+      "sizes": "512x512",
+      "purpose": "any maskable"
     }
   ],
   "start_url": ".",
   "display": "standalone",
   "theme_color": "#4CAF50",
-  "background_color": "#ffffff"
+  "background_color": "#ffffff",
+  "orientation": "landscape",
+  "categories": ["education", "productivity", "lifestyle"],
+  "screenshots": [
+    {
+      "src": "screenshot.png",
+      "sizes": "1280x720",
+      "type": "image/png"
+    }
+  ]
 }
