@@ -106,13 +106,13 @@ const GlobalStyle = createGlobalStyle`
   main {
     flex: 1;
     padding: 2rem;
-    max-width: 1200px;
+    max-width: 1920px;
     margin: 0 auto;
     width: 100%;
   }
 
   .container {
-    max-width: 1200px;
+    max-width: 1920px;
     margin: 0 auto;
     padding: 0 1rem;
   }

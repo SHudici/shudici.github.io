@@ -8,10 +8,10 @@ import SkillDetails from './SkillDetails';
 const TreeContainer = styled.div`
   display: flex;
   flex-direction: column;
-  height: calc(100vh - 200px);
-  min-height: 600px;
+  height: calc(100vh - 120px);
+  min-height: 800px;
+  max-height: 1080px;
   position: relative;
-  background: linear-gradient(to bottom, #87CEEB 0%, #87CEEB 60%, #98FB98 60%, #228B22 100%);
   border-radius: var(--border-radius);
   box-shadow: inset 0 0 10px rgba(0, 0, 0, 0.1);
   overflow: hidden;
@@ -20,6 +20,13 @@ const TreeContainer = styled.div`
 const TreeSvg = styled.svg`
   width: 100%;
   height: 100%;
+  position: relative;
+  z-index: 1;
+  cursor: grab;
+  
+  &:active {
+    cursor: grabbing;
+  }
 `;
 
 const Controls = styled.div`
@@ -312,7 +319,9 @@ const SkillTreeView: React.FC = () => {
     const trunkSegments = 5;
     for (let i = 0; i <= trunkSegments; i++) {
       const t = i / trunkSegments;
-      const x = trunkBase.x + (trunkTop.x - trunkBase.x) * t + (Math.random() - 0.5) * 10;
+      // Use deterministic curve based on segment index instead of random
+      const curve = Math.sin(i * 0.5) * 5;
+      const x = trunkBase.x + (trunkTop.x - trunkBase.x) * t + curve;
       const y = trunkBase.y + (trunkTop.y - trunkBase.y) * t;
       treeNodes.push({
         id: `trunk-${i}`,
@@ -341,12 +350,17 @@ const SkillTreeView: React.FC = () => {
       // Vary the starting height on trunk
       const trunkAttachmentHeight = -30 - (catIndex % 3) * 30;
       
-      // Category branch length - more variation
-      const branchLength = 140 + (catIndex % 3) * 30 + Math.random() * 20;
+      // Category branch length - deterministic variation based on index
+      const branchLength = 140 + (catIndex % 3) * 30 + (catIndex * 7) % 20;
       
       // Calculate branch endpoint
       const endX = Math.cos(radians) * branchLength;
       const endY = trunkAttachmentHeight + Math.sin(radians) * branchLength;
+      
+      // Calculate total skill development in this category for branch thickness
+      const totalCategorySkillLevels = category.skills.reduce((sum, skill) => sum + skill.level, 0);
+      const maxPossibleLevels = category.skills.reduce((sum, skill) => sum + skill.maxLevel, 0);
+      const categoryDevelopment = maxPossibleLevels > 0 ? totalCategorySkillLevels / maxPossibleLevels : 0;
       
       // Create category node with smaller size (30% reduction)
       const categoryNode: TreeNode = {
@@ -360,7 +374,7 @@ const SkillTreeView: React.FC = () => {
         color: category.color,
         angleOffset: angle,
         depth: 1,
-        branchThickness: 12
+        branchThickness: 20 + Math.floor(categoryDevelopment * 15) // Thicker by default (20) and grows with development
       };
       
       treeNodes.push(categoryNode);
@@ -431,22 +445,32 @@ const SkillTreeView: React.FC = () => {
         let skillAngle = parentAngle;
         if (depth === 1) {
           // Root skills spread from category
-          const spreadAngle = 90;
+          const spreadAngle = 70;
           const angleOffset = siblingCount > 1 ? (siblingIndex - (siblingCount - 1) / 2) * (spreadAngle / (siblingCount - 1)) : 0;
           skillAngle = angle + angleOffset;
         } else {
           // Dependent skills spread from their parent
-          const spreadAngle = 60;
+          const spreadAngle = 50;
           const angleOffset = siblingCount > 1 ? (siblingIndex - (siblingCount - 1) / 2) * (spreadAngle / (siblingCount - 1)) : 0;
           skillAngle = parentNode?.angleOffset || angle;
           skillAngle += angleOffset;
         }
         
+        // Prevent branches from going downward (limit angle range)
+        // In our coordinate system, -90 is straight up, 0 is right, 90 is down
+        // We want to limit angles to between -160 and -20 (upward arc)
+        if (skillAngle > -20) {
+          skillAngle = -20;
+        } else if (skillAngle < -160) {
+          skillAngle = -160;
+        }
+        
         const skillRadians = (skillAngle * Math.PI) / 180;
         
-        // Distance based on depth with more spacing
+        // Distance based on depth with more spacing - deterministic based on skill ID
         const baseDistance = depth === 1 ? 100 : 80; // Increased spacing
-        const skillDistance = baseDistance + Math.random() * 10;
+        const skillHash = skill.id.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+        const skillDistance = baseDistance + (skillHash % 10);
         
         // Calculate skill position
         const skillX = baseX + Math.cos(skillRadians) * skillDistance;
@@ -509,54 +533,93 @@ const SkillTreeView: React.FC = () => {
     const centerY = height / 2 + 100;
     
     const svg = d3.select(svgRef.current);
-    const g = svg.append('g');
     
-    // Set up zoom behavior
+    // Create main container group that will be transformed (contains both background and tree)
+    const mainGroup = svg.append('g').attr('class', 'main-group');
+    
+    // Add background image to main group - make it much larger
+    mainGroup.append('image')
+      .attr('x', -width * 4)
+      .attr('y', -height * 4)
+      .attr('width', width * 8)
+      .attr('height', height * 8)
+      .attr('href', '/background.png')
+      .attr('preserveAspectRatio', 'xMidYMid slice');
+    
+    // Add white overlay to main group
+    mainGroup.append('rect')
+      .attr('x', -width * 4)
+      .attr('y', -height * 4)
+      .attr('width', width * 8)
+      .attr('height', height * 8)
+      .attr('fill', 'rgba(255, 255, 255, 0.4)');
+    
+    // Create tree group within main group
+    const g = mainGroup.append('g')
+      .attr('transform', `translate(${centerX}, ${centerY})`);
+    
+    // Set up zoom behavior that transforms the entire main group
     const zoomBehavior = d3.zoom<SVGSVGElement, unknown>()
-      .scaleExtent([0.3, 3])
+      .scaleExtent([0.2, 3])
+      .wheelDelta((event) => {
+        // Control zoom speed and ensure smooth zooming on mouse position
+        return -event.deltaY * 0.002;
+      })
       .on('zoom', (event) => {
-        g.attr('transform', event.transform);
-        currentTransformRef.current = event.transform;
+        const transform = event.transform;
+        const scale = transform.k;
+        
+        // Calculate the visible area of the background at current scale
+        // Background dimensions in scaled coordinates
+        const scaledBgWidth = width * 8 * scale;
+        const scaledBgHeight = height * 8 * scale;
+        
+        // Calculate maximum pan distances
+        const maxPanX = (scaledBgWidth - width) / 2;
+        const maxPanY = (scaledBgHeight - height) / 2;
+        
+        // Apply constraints only if background is larger than viewport
+        let constrainedX = transform.x;
+        let constrainedY = transform.y;
+        
+        if (scaledBgWidth > width) {
+          constrainedX = Math.min(Math.max(transform.x, -maxPanX), maxPanX);
+        } else {
+          // If background is smaller than viewport, center it
+          constrainedX = 0;
+        }
+        
+        if (scaledBgHeight > height) {
+          constrainedY = Math.min(Math.max(transform.y, -maxPanY), maxPanY);
+        } else {
+          // If background is smaller than viewport, center it
+          constrainedY = 0;
+        }
+        
+        // Apply the constrained transform
+        const constrainedTransform = d3.zoomIdentity
+          .translate(constrainedX, constrainedY)
+          .scale(scale);
+        
+        mainGroup.attr('transform', constrainedTransform.toString());
+        currentTransformRef.current = constrainedTransform;
+      })
+      .filter((event) => {
+        // Allow all zoom events (wheel, drag, etc.)
+        // Prevent zoom on double-click
+        return event.type !== 'dblclick';
       });
     
     svg.call(zoomBehavior);
     zoomRef.current = zoomBehavior;
     
-    // Use saved transform or default
-    const savedTransform = currentTransformRef.current || d3.zoomIdentity.translate(centerX, centerY).scale(0.6);
+    // Use saved transform or default centered on tree with lower zoom
+    const savedTransform = currentTransformRef.current || 
+      d3.zoomIdentity
+        .translate(width / 2, height / 2)
+        .scale(0.3)
+        .translate(-centerX, -centerY);
     svg.call(zoomBehavior.transform, savedTransform);
-    
-    // Draw ground
-    const groundGradient = g.append('defs')
-      .append('radialGradient')
-      .attr('id', 'groundGradient');
-    
-    groundGradient.append('stop')
-      .attr('offset', '0%')
-      .attr('stop-color', '#654321')
-      .attr('stop-opacity', 0.8);
-    
-    groundGradient.append('stop')
-      .attr('offset', '100%')
-      .attr('stop-color', '#8B4513')
-      .attr('stop-opacity', 0.4);
-    
-    g.append('ellipse')
-      .attr('cx', 0)
-      .attr('cy', 220)
-      .attr('rx', 350)
-      .attr('ry', 60)
-      .attr('fill', 'url(#groundGradient)');
-    
-    // Add grass patches
-    for (let i = 0; i < 30; i++) {
-      const grassX = (Math.random() - 0.5) * 700;
-      const grassY = 210 + Math.random() * 25;
-      g.append('path')
-        .attr('d', `M ${grassX} ${grassY} L ${grassX - 2} ${grassY - 10} L ${grassX + 2} ${grassY - 10} Z`)
-        .attr('fill', '#228B22')
-        .attr('opacity', 0.6);
-    }
     
     // Create organic trunk
     const trunkNodes = nodes.filter(n => n.type === 'trunk');
@@ -585,17 +648,17 @@ const SkillTreeView: React.FC = () => {
       .attr('stroke', '#4A3621')
       .attr('stroke-width', 2);
     
-    // Add bark texture
+    // Add bark texture - deterministic based on index
     for (let i = 0; i < 10; i++) {
-      const startY = 200 - Math.random() * 300;
-      const endY = startY - 20 - Math.random() * 40;
-      const xOffset = (Math.random() - 0.5) * 30;
+      const startY = 200 - (i * 30);
+      const endY = startY - 30 - (i % 3) * 10;
+      const xOffset = Math.sin(i * 1.5) * 15;
       
       trunkGroup.append('path')
-        .attr('d', `M ${xOffset} ${startY} L ${xOffset + (Math.random() - 0.5) * 10} ${endY}`)
-        .attr('stroke', '#4A3621')
-        .attr('stroke-width', 1)
-        .attr('opacity', 0.5);
+        .attr('d', `M ${xOffset} ${startY} L ${xOffset + Math.cos(i) * 5} ${endY}`)
+        .attr('stroke', '#3A2611')
+        .attr('stroke-width', 2)
+        .attr('opacity', 0.7);
     }
     
     // Draw branches based on dependencies
@@ -634,28 +697,32 @@ const SkillTreeView: React.FC = () => {
         // Less curve for skill dependencies to show clear connections
         const curveFactor = d.isSkillDependency ? 0.1 : 0.2;
         
-        const ctrl1X = d.source.x + dx * 0.3 + (Math.random() - 0.5) * 20 * curveFactor;
+        // Use deterministic curve based on node IDs
+        const nodeHash = (d.target.id + d.source.id).split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+        const curveBias = Math.sin(nodeHash * 0.1) * 10;
+        
+        const ctrl1X = d.source.x + dx * 0.3 + curveBias * curveFactor;
         const ctrl1Y = d.source.y + dy * 0.3 - Math.abs(dx) * curveFactor;
-        const ctrl2X = d.source.x + dx * 0.7 + (Math.random() - 0.5) * 20 * curveFactor;
+        const ctrl2X = d.source.x + dx * 0.7 + curveBias * curveFactor;
         const ctrl2Y = d.source.y + dy * 0.7 - Math.abs(dx) * curveFactor * 0.5;
         
         return `M ${d.source.x} ${d.source.y} C ${ctrl1X} ${ctrl1Y}, ${ctrl2X} ${ctrl2Y}, ${d.target.x} ${d.target.y}`;
       })
       .attr('stroke', d => {
-        if (d?.target.type === 'category') return '#654321';
-        if (d?.isLocked) return '#999999';
-        return d?.target.color || '#8B4513';
+        if (d?.target.type === 'category') return '#3A2611';
+        if (d?.isLocked) return '#666666';
+        return d?.target.color || '#654321';
       })
       .attr('stroke-width', d => {
         if (d?.isLocked) return (d?.thickness || 6) * 0.5;
-        return d?.thickness || 6;
+        return (d?.thickness || 6) + 2; // Make branches thicker
       })
       .attr('fill', 'none')
       .attr('stroke-linecap', 'round')
       .attr('opacity', d => {
-        if (d?.isLocked) return 0.3;
-        if (d?.isSkillDependency) return 0.6;
-        return 0.8;
+        if (d?.isLocked) return 0.4;
+        if (d?.isSkillDependency) return 0.8;
+        return 1; // Full opacity for better visibility
       })
       .attr('stroke-dasharray', d => {
         // Dashed line for locked skill dependencies
@@ -758,19 +825,19 @@ const SkillTreeView: React.FC = () => {
           .attr('fill', 'transparent')
           .attr('cursor', 'pointer');
         
-        // Draw leaves for skills with levels
+        // Draw leaves for skills with levels - deterministic positioning
         if (level > 0) {
           const leafCount = Math.min(level * 2, 8);
           for (let i = 0; i < leafCount; i++) {
-            const angle = (i / leafCount) * 2 * Math.PI + Math.random() * 0.5;
-            const distance = (d.radius || 8) + 5 + Math.random() * 5;
+            const angle = (i / leafCount) * 2 * Math.PI + (d.id.charCodeAt(0) % 10) * 0.1;
+            const distance = (d.radius || 8) + 5 + (i % 3) * 2;
             const leafX = Math.cos(angle) * distance;
             const leafY = Math.sin(angle) * distance;
             
             group.append('path')
               .attr('d', `M 0 0 Q ${leafX * 0.5} ${leafY * 0.5 - 3}, ${leafX} ${leafY} Q ${leafX + 3} ${leafY + 2}, ${leafX * 0.7} ${leafY * 0.7 + 2} Z`)
               .attr('fill', d.color || '#4CAF50')
-              .attr('opacity', 0.7 + Math.random() * 0.3);
+              .attr('opacity', 0.8 + (i % 3) * 0.1);
           }
         }
         
@@ -905,13 +972,23 @@ const SkillTreeView: React.FC = () => {
   // Zoom controls
   const handleZoomIn = () => {
     if (svgRef.current && zoomRef.current) {
-      d3.select(svgRef.current).transition().call(zoomRef.current.scaleBy as any, 1.2);
+      const width = svgRef.current.clientWidth;
+      const height = svgRef.current.clientHeight;
+      // Zoom relative to center when using buttons
+      d3.select(svgRef.current)
+        .transition()
+        .call(zoomRef.current.scaleBy as any, 1.2, [width / 2, height / 2]);
     }
   };
   
   const handleZoomOut = () => {
     if (svgRef.current && zoomRef.current) {
-      d3.select(svgRef.current).transition().call(zoomRef.current.scaleBy as any, 0.8);
+      const width = svgRef.current.clientWidth;
+      const height = svgRef.current.clientHeight;
+      // Zoom relative to center when using buttons
+      d3.select(svgRef.current)
+        .transition()
+        .call(zoomRef.current.scaleBy as any, 0.8, [width / 2, height / 2]);
     }
   };
   
@@ -919,9 +996,17 @@ const SkillTreeView: React.FC = () => {
     if (svgRef.current && zoomRef.current) {
       const width = svgRef.current.clientWidth;
       const height = svgRef.current.clientHeight;
+      const centerX = width / 2;
+      const centerY = height / 2 + 100;
+      
+      const resetTransform = d3.zoomIdentity
+        .translate(width / 2, height / 2)
+        .scale(0.3)
+        .translate(-centerX, -centerY);
+        
       d3.select(svgRef.current)
         .transition()
-        .call(zoomRef.current.transform as any, d3.zoomIdentity.translate(width / 2, height / 2 + 100).scale(0.6));
+        .call(zoomRef.current.transform as any, resetTransform);
     }
   };
   
